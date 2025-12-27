@@ -49,7 +49,7 @@ class TTSInterface:
         self.temp_dir.mkdir(exist_ok=True)
         print("Model loaded successfully!")
     
-    def synthesize(self, text, speaker, speed, noise_scale, noise_scale_w, sdp_ratio):
+    def synthesize(self, text, speaker, speed, noise_scale, noise_scale_w, sdp_ratio, chunk_mode, max_chunk_chars):
         """
         Synthesize speech from text with given parameters.
         
@@ -60,21 +60,27 @@ class TTSInterface:
             if not text or not text.strip():
                 return None, "⚠️ Vui lòng nhập văn bản"
             
-            # Synthesize
+            # Synthesize with chunking support
             audio, sr = self.tts.synthesize(
                 text=text.strip(),
                 speaker=speaker,
-                length_scale=speed,
+                sdp_ratio=sdp_ratio,
                 noise_scale=noise_scale,
                 noise_scale_w=noise_scale_w,
-                sdp_ratio=sdp_ratio,
+                length_scale=speed,
+                chunk_mode=chunk_mode,
+                max_chunk_chars=max_chunk_chars,
             )
             
             # Save to temp file
             output_path = self.temp_dir / f"output_{hash(text)}.wav"
             self.tts.save_audio(audio, sr, str(output_path))
             
-            return str(output_path), f"✅ Tạo giọng nói thành công! ({len(audio)/sr:.2f}s)"
+            chunk_info = ""
+            if chunk_mode != "none" and len(text.strip()) > max_chunk_chars:
+                chunk_info = f" (đã chia nhỏ)"
+            
+            return str(output_path), f"✅ Tạo giọng nói thành công! ({len(audio)/sr:.2f}s){chunk_info}"
             
         except Exception as e:
             return None, f"❌ Lỗi: {str(e)}"
@@ -85,11 +91,11 @@ def create_demo(tts_interface):
     
     # Example texts
     examples = [
-        ["Xin chào, tôi là trợ lý AI của Valtec", "male", 1.0, 0.667, 0.8, 0.0],
-        ["Buổi sáng hôm nay trời trong xanh và gió thổi rất nhẹ", "male", 1.0, 0.667, 0.8, 0.0],
-        ["Tôi pha một tách cà phê nóng và ngồi nhìn ánh nắng chiếu qua cửa sổ", "female", 1.0, 0.667, 0.8, 0.0],
-        ["Việt Nam là một đất nước xinh đẹp với văn hóa phong phú", "male", 0.9, 0.667, 0.8, 0.0],
-        ["Công nghệ trí tuệ nhân tạo đang phát triển rất nhanh", "female", 1.1, 0.667, 0.8, 0.0],
+        ["Xin chào, tôi là trợ lý AI của Valtec", "male", 1.0, 0.667, 0.8, 0.0, "auto", 200],
+        ["Buổi sáng hôm nay trời trong xanh và gió thổi rất nhẹ", "male", 1.0, 0.667, 0.8, 0.0, "auto", 200],
+        ["Tôi pha một tách cà phê nóng và ngồi nhìn ánh nắng chiếu qua cửa sổ", "female", 1.0, 0.667, 0.8, 0.0, "auto", 200],
+        ["Việt Nam là một đất nước xinh đẹp với văn hóa phong phú", "male", 0.9, 0.667, 0.8, 0.0, "auto", 200],
+        ["Công nghệ trí tuệ nhân tạo đang phát triển rất nhanh", "female", 1.1, 0.667, 0.8, 0.0, "auto", 200],
     ]
     
     with gr.Blocks(
@@ -108,6 +114,17 @@ def create_demo(tts_interface):
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             font-weight: bold;
+        }
+        .chunk-warning {
+            color: #ff6b6b;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+        .chunk-section {
+            background: rgba(102, 126, 234, 0.05);
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(102, 126, 234, 0.2);
         }
         """
     ) as demo:
@@ -186,6 +203,32 @@ def create_demo(tts_interface):
                         label="SDP Ratio",
                         info="0: Xác định | 1: Ngẫu nhiên"
                     )
+                
+                # Chunking settings - now more prominent
+                with gr.Column(elem_classes=["chunk-section"]):
+                    gr.Markdown("### 🔧 Chia nhỏ văn bản (OOM Prevention)")
+                    
+                    chunk_mode_dropdown = gr.Dropdown(
+                        choices=["auto", "sentence", "length", "none"],
+                        value="auto",
+                        label="Chế độ chia nhỏ",
+                        info="auto: Tự động | sentence: Theo câu | length: Theo độ dài | none: Không chia"
+                    )
+                    
+                    max_chunk_chars_slider = gr.Slider(
+                        minimum=50,
+                        maximum=500,
+                        value=200,
+                        step=10,
+                        label="Số ký tự tối đa mỗi đoạn",
+                        info="Chỉ áp dụng khi chọn chế độ 'length' hoặc 'auto'"
+                    )
+                    
+                    # Dynamic warning
+                    chunk_warning = gr.Markdown(
+                        "",
+                        elem_classes=["chunk-warning"]
+                    )
         
         # Output
         with gr.Row():
@@ -211,7 +254,9 @@ def create_demo(tts_interface):
                 speed_slider,
                 noise_scale_slider,
                 noise_scale_w_slider,
-                sdp_ratio_slider
+                sdp_ratio_slider,
+                chunk_mode_dropdown,
+                max_chunk_chars_slider,
             ],
             outputs=[audio_output, status_output],
             fn=tts_interface.synthesize,
@@ -219,6 +264,38 @@ def create_demo(tts_interface):
         )
         
         # Event handlers
+        def update_chunk_warning(text, chunk_mode, max_chars):
+            """Update warning based on text length and chunk mode."""
+            if not text or chunk_mode == "none":
+                return ""
+            
+            text_len = len(text.strip())
+            if chunk_mode == "auto" and text_len > 200:
+                return f"⚠️ Văn bản dài ({text_len} ký tự), sẽ tự động chia nhỏ theo câu."
+            elif chunk_mode == "length" and text_len > max_chars:
+                return f"⚠️ Văn bản dài ({text_len} ký tự), sẽ chia thành các đoạn tối đa {max_chars} ký tự."
+            elif chunk_mode == "sentence":
+                return f"ℹ️ Văn bản sẽ được chia theo dấu câu."
+            
+            return ""
+        
+        # Update warning when inputs change
+        text_input.change(
+            fn=update_chunk_warning,
+            inputs=[text_input, chunk_mode_dropdown, max_chunk_chars_slider],
+            outputs=chunk_warning
+        )
+        chunk_mode_dropdown.change(
+            fn=update_chunk_warning,
+            inputs=[text_input, chunk_mode_dropdown, max_chunk_chars_slider],
+            outputs=chunk_warning
+        )
+        max_chunk_chars_slider.change(
+            fn=update_chunk_warning,
+            inputs=[text_input, chunk_mode_dropdown, max_chunk_chars_slider],
+            outputs=chunk_warning
+        )
+        
         synthesize_btn.click(
             fn=tts_interface.synthesize,
             inputs=[
@@ -228,6 +305,8 @@ def create_demo(tts_interface):
                 noise_scale_slider,
                 noise_scale_w_slider,
                 sdp_ratio_slider,
+                chunk_mode_dropdown,
+                max_chunk_chars_slider,
             ],
             outputs=[audio_output, status_output],
         )
@@ -237,7 +316,7 @@ def create_demo(tts_interface):
             """
             ---
             <div style="text-align: center; color: #666; font-size: 0.9em;">
-                Powered by <b>Valtec TTS</b>
+                Powered by <b>Valtec TTS</b> | Hỗ trợ chia nhỏ văn bản dài để tránh OOM
             </div>
             """
         )

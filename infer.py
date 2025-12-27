@@ -71,6 +71,10 @@ def parse_args():
                         help="Noise scale for duration")
     parser.add_argument("--length_scale", type=float, default=1.0,
                         help="Length scale (speed)")
+    parser.add_argument("--chunk_mode", type=str, default="auto",
+                        help="Chunking mode: 'auto' (default), 'sentence', 'length', or 'none'")
+    parser.add_argument("--max_chunk_chars", type=int, default=200,
+                        help="Maximum characters per chunk when using length mode")
     return parser.parse_args()
 
 
@@ -126,6 +130,233 @@ class VietnameseTTS:
         
         print(f"Model loaded from {checkpoint_path}")
     
+    def _split_text_into_chunks(self, text, mode="auto", max_chars=200):
+        """
+        Split text into chunks for processing.
+        
+        Args:
+            text: Input text to split
+            mode: 'auto' (sentences), 'sentence' (by punctuation), 'length' (by character count), 'none' (no splitting)
+            max_chars: Maximum characters per chunk for length mode
+        
+        Returns:
+            List of text chunks
+        """
+        if mode == "none":
+            return [text]
+        
+        if mode == "auto":
+            # Try sentence splitting first
+            chunks = self._split_by_sentences(text, max_chars)
+            if len(chunks) == 1 and len(chunks[0]) > max_chars:
+                # If only one chunk and it's too long, split by length
+                chunks = self._split_by_length(text, max_chars)
+            return chunks
+        
+        elif mode == "sentence":
+            return self._split_by_sentences(text, max_chars)
+        
+        elif mode == "length":
+            return self._split_by_length(text, max_chars)
+        
+        else:
+            return [text]
+    
+    def _split_by_sentences(self, text, max_chars=200):
+        """
+        Split text by sentence-ending punctuation, but also respect max_chars limit.
+        If any sentence exceeds max_chars, it will be further split by length.
+        """
+        # Vietnamese sentence endings: . ! ? ... 
+        # Also handle cases where punctuation might be followed by quotes or spaces
+        import re
+        
+        # Split by punctuation while preserving the punctuation
+        pattern = r'([.!?…]+[\s\'"\)\]]*|\n+)'
+        parts = re.split(pattern, text)
+        
+        sentences = []
+        current_sentence = ""
+        
+        for part in parts:
+            if not part:
+                continue
+                
+            # If part ends with punctuation, it's a sentence end
+            if re.search(r'[.!?…]+', part):
+                current_sentence += part
+                if current_sentence.strip():
+                    sentences.append(current_sentence.strip())
+                current_sentence = ""
+            else:
+                # Add to current sentence
+                current_sentence += part
+        
+        # Add remaining text
+        if current_sentence.strip():
+            sentences.append(current_sentence.strip())
+        
+        # If we got too many small sentences, merge them
+        if len(sentences) > 1:
+            merged = []
+            current = ""
+            for sentence in sentences:
+                if len(current) + len(sentence) < 150:
+                    current += " " + sentence if current else sentence
+                else:
+                    if current:
+                        merged.append(current)
+                    current = sentence
+            if current:
+                merged.append(current)
+            sentences = merged
+        
+        # Fallback to original text if splitting failed
+        if not sentences:
+            sentences = [text]
+        
+        # Now check each sentence against max_chars and split long ones
+        final_chunks = []
+        for sentence in sentences:
+            if len(sentence) <= max_chars:
+                final_chunks.append(sentence)
+            else:
+                # This sentence is too long, split it by length
+                long_chunks = self._split_by_length(sentence, max_chars)
+                final_chunks.extend(long_chunks)
+        
+        return final_chunks
+    
+    def _split_by_length(self, text, max_chars):
+        """
+        Split text by max characters first, but avoid cutting sentences in the middle.
+        This is the primary splitting method for OOM prevention.
+        """
+        import re
+        
+        # First, find all sentence boundaries
+        sentence_pattern = r'([.!?…]+[\s\'"\)\]]*|\n+)'
+        sentence_parts = re.split(sentence_pattern, text)
+        
+        # Reconstruct sentences with their boundaries
+        sentences = []
+        current_sentence = ""
+        
+        for part in sentence_parts:
+            if not part:
+                continue
+                
+            if re.search(r'[.!?…]+', part):
+                current_sentence += part
+                if current_sentence.strip():
+                    sentences.append(current_sentence.strip())
+                current_sentence = ""
+            else:
+                current_sentence += part
+        
+        if current_sentence.strip():
+            sentences.append(current_sentence.strip())
+        
+        # If no clear sentences, fall back to word-based splitting
+        if len(sentences) == 1 and len(sentences[0]) == len(text):
+            return self._split_by_words(text, max_chars)
+        
+        # Now build chunks by combining sentences without exceeding max_chars
+        chunks = []
+        current_chunk = ""
+        
+        for sentence in sentences:
+            # If adding this sentence would exceed limit
+            test_chunk = current_chunk + " " + sentence if current_chunk else sentence
+            
+            if len(test_chunk) <= max_chars:
+                # It fits, add it
+                current_chunk = test_chunk
+            else:
+                # It doesn't fit
+                if current_chunk:
+                    # Save current chunk
+                    chunks.append(current_chunk)
+                    # Start new chunk with current sentence
+                    current_chunk = sentence
+                else:
+                    # Single sentence is too long, split it by words
+                    word_chunks = self._split_by_words(sentence, max_chars)
+                    chunks.extend(word_chunks)
+                    current_chunk = ""
+        
+        # Add final chunk
+        if current_chunk:
+            chunks.append(current_chunk)
+        
+        return chunks
+    
+    def _split_by_words(self, text, max_chars):
+        """
+        Fallback method: split by words when sentences are too long.
+        Tries to avoid cutting words in half.
+        """
+        words = text.split()
+        chunks = []
+        current_chunk = ""
+        
+        for word in words:
+            # Check if adding this word would exceed limit
+            test_chunk = current_chunk + " " + word if current_chunk else word
+            if len(test_chunk) <= max_chars:
+                current_chunk = test_chunk
+            else:
+                # Save current chunk
+                if current_chunk:
+                    chunks.append(current_chunk)
+                # Start new chunk with current word
+                current_chunk = word
+        
+        # Add final chunk
+        if current_chunk:
+            chunks.append(current_chunk)
+        
+        # If any chunk is still too long, split it roughly
+        final_chunks = []
+        for chunk in chunks:
+            if len(chunk) <= max_chars:
+                final_chunks.append(chunk)
+            else:
+                # Split roughly at character limit
+                for i in range(0, len(chunk), max_chars):
+                    final_chunks.append(chunk[i:i+max_chars])
+        
+        return final_chunks
+    
+    def _concatenate_audio(self, audio_chunks, sr, pause_duration=0.1):
+        """
+        Concatenate audio chunks with short pauses between them.
+        
+        Args:
+            audio_chunks: List of numpy audio arrays
+            sr: Sample rate
+            pause_duration: Duration of pause in seconds between chunks
+        
+        Returns:
+            Concatenated audio array
+        """
+        if len(audio_chunks) == 1:
+            return audio_chunks[0]
+        
+        # Create pause audio (silence)
+        pause_samples = int(pause_duration * sr)
+        pause_audio = np.zeros(pause_samples)
+        
+        # Concatenate with pauses
+        result = []
+        for i, chunk in enumerate(audio_chunks):
+            result.append(chunk)
+            # Add pause after each chunk except the last
+            if i < len(audio_chunks) - 1:
+                result.append(pause_audio)
+        
+        return np.concatenate(result)
+    
     def text_to_sequence(self, text, speaker):
         """Convert text to model input tensors."""
         from src.text import cleaned_text_to_sequence
@@ -167,9 +398,9 @@ class VietnameseTTS:
     
     @torch.no_grad()
     def synthesize(self, text, speaker, sdp_ratio=0.0, noise_scale=0.667, 
-                   noise_scale_w=0.8, length_scale=1.0):
+                   noise_scale_w=0.8, length_scale=1.0, chunk_mode="auto", max_chunk_chars=200):
         """
-        Synthesize speech from text.
+        Synthesize speech from text with optional chunking for long texts.
         
         Args:
             text: Input Vietnamese text
@@ -178,11 +409,38 @@ class VietnameseTTS:
             noise_scale: Noise scale for generation
             noise_scale_w: Noise scale for duration
             length_scale: Speed control (1.0=normal, <1.0=faster, >1.0=slower)
+            chunk_mode: 'auto', 'sentence', 'length', or 'none'
+            max_chunk_chars: Maximum characters per chunk
         
         Returns:
             audio: numpy array of audio samples
             sr: sample rate
         """
+        # Check if text is too long and needs chunking
+        if chunk_mode != "none" and len(text) > max_chunk_chars:
+            print(f"Text is long ({len(text)} chars), splitting into chunks using mode: {chunk_mode}")
+            chunks = self._split_text_into_chunks(text, chunk_mode, max_chunk_chars)
+            
+            if len(chunks) == 1:
+                # Single chunk, process normally
+                return self._synthesize_single_chunk(text, speaker, sdp_ratio, noise_scale, noise_scale_w, length_scale)
+            
+            # Process each chunk
+            audio_chunks = []
+            for i, chunk in enumerate(chunks):
+                print(f"Processing chunk {i+1}/{len(chunks)}: {chunk[:50]}...")
+                audio, sr = self._synthesize_single_chunk(chunk, speaker, sdp_ratio, noise_scale, noise_scale_w, length_scale)
+                audio_chunks.append(audio)
+            
+            # Concatenate with pauses
+            final_audio = self._concatenate_audio(audio_chunks, sr)
+            return final_audio, sr
+        else:
+            # No chunking needed
+            return self._synthesize_single_chunk(text, speaker, sdp_ratio, noise_scale, noise_scale_w, length_scale)
+    
+    def _synthesize_single_chunk(self, text, speaker, sdp_ratio, noise_scale, noise_scale_w, length_scale):
+        """Synthesize a single chunk of text."""
         # Prepare inputs
         x, x_lengths, tone, language, sid, bert, ja_bert = self.text_to_sequence(text, speaker)
         
@@ -306,9 +564,11 @@ def main():
         print(f"Default speaker: {default_speaker}")
         print(f"Available speakers: {', '.join(tts.speakers)}")
         print("Commands: 'quit' to exit, 'speaker NAME' to change speaker")
+        print("          'chunk MODE' to change chunking mode (auto/sentence/length/none)")
         print("=" * 60 + "\n")
         
         current_speaker = default_speaker
+        current_chunk_mode = args.chunk_mode
         
         while True:
             try:
@@ -329,14 +589,25 @@ def main():
                         print(f"Speaker not found. Available: {', '.join(tts.speakers)}")
                     continue
                 
+                if text.lower().startswith('chunk '):
+                    new_mode = text[6:].strip().lower()
+                    if new_mode in ['auto', 'sentence', 'length', 'none']:
+                        current_chunk_mode = new_mode
+                        print(f"Chunk mode changed to: {current_chunk_mode}")
+                    else:
+                        print(f"Invalid mode. Use: auto, sentence, length, or none")
+                    continue
+                
                 # Synthesize
-                print(f"Synthesizing with speaker '{current_speaker}'...")
+                print(f"Synthesizing with speaker '{current_speaker}' (chunk mode: {current_chunk_mode})...")
                 audio, sr = tts.synthesize(
                     text, current_speaker,
                     sdp_ratio=args.sdp_ratio,
                     noise_scale=args.noise_scale,
                     noise_scale_w=args.noise_scale_w,
                     length_scale=args.length_scale,
+                    chunk_mode=current_chunk_mode,
+                    max_chunk_chars=args.max_chunk_chars,
                 )
                 
                 # Save with timestamp
@@ -376,6 +647,8 @@ def main():
                     noise_scale=args.noise_scale,
                     noise_scale_w=args.noise_scale_w,
                     length_scale=args.length_scale,
+                    chunk_mode=args.chunk_mode,
+                    max_chunk_chars=args.max_chunk_chars,
                 )
                 
                 output_path = _resolve_output_path(
@@ -401,6 +674,8 @@ def main():
             noise_scale=args.noise_scale,
             noise_scale_w=args.noise_scale_w,
             length_scale=args.length_scale,
+            chunk_mode=args.chunk_mode,
+            max_chunk_chars=args.max_chunk_chars,
         )
         
         output_path = _resolve_output_path(args.output, str(output_dir), iter_suffix)
@@ -409,6 +684,7 @@ def main():
     else:
         print("Please provide --text, --input_file, or --interactive")
         print("Example: python infer.py --checkpoint G_10000.pth --config config.json --text 'Xin chào'")
+        print("         python infer.py --text 'Very long text...' --chunk_mode auto --max_chunk_chars 150")
 
 
 if __name__ == "__main__":

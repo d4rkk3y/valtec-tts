@@ -167,9 +167,11 @@ class TTS:
         noise_scale: float = 0.667,
         noise_scale_w: float = 0.8,
         sdp_ratio: float = 0.0,
+        chunk_mode: str = "auto",
+        max_chunk_chars: int = 200,
     ) -> Tuple[np.ndarray, int]:
         """
-        Synthesize speech from text.
+        Synthesize speech from text with optional chunking for long texts.
         
         Args:
             text: Vietnamese text to synthesize.
@@ -178,6 +180,8 @@ class TTS:
             noise_scale: Controls voice variability.
             noise_scale_w: Controls duration variability.
             sdp_ratio: Stochastic duration predictor ratio (0 = deterministic).
+            chunk_mode: Chunking mode for long texts ('auto', 'sentence', 'length', or 'none').
+            max_chunk_chars: Maximum characters per chunk when using length mode.
         
         Returns:
             Tuple of (audio_array, sample_rate)
@@ -190,10 +194,12 @@ class TTS:
         audio, sr = self._engine.synthesize(
             text=text,
             speaker=speaker,
-            length_scale=speed,
+            sdp_ratio=sdp_ratio,
             noise_scale=noise_scale,
             noise_scale_w=noise_scale_w,
-            sdp_ratio=sdp_ratio,
+            length_scale=speed,
+            chunk_mode=chunk_mode,
+            max_chunk_chars=max_chunk_chars,
         )
         
         return audio, sr
@@ -205,6 +211,8 @@ class TTS:
         speaker: Optional[str] = None,
         speed: float = 1.0,
         play: bool = False,
+        chunk_mode: str = "auto",
+        max_chunk_chars: int = 200,
         **kwargs
     ) -> str:
         """
@@ -216,12 +224,21 @@ class TTS:
             speaker: Speaker name. Uses default if not specified.
             speed: Speech speed (1.0 = normal).
             play: If True, attempt to play the audio (requires sounddevice).
+            chunk_mode: Chunking mode for long texts ('auto', 'sentence', 'length', or 'none').
+            max_chunk_chars: Maximum characters per chunk when using length mode.
             **kwargs: Additional arguments passed to synthesize().
         
         Returns:
             Path to the saved audio file.
         """
-        audio, sr = self.synthesize(text, speaker=speaker, speed=speed, **kwargs)
+        audio, sr = self.synthesize(
+            text, 
+            speaker=speaker, 
+            speed=speed, 
+            chunk_mode=chunk_mode,
+            max_chunk_chars=max_chunk_chars,
+            **kwargs
+        )
         
         # Save audio
         import soundfile as sf
