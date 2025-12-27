@@ -180,7 +180,7 @@ def create_demo(tts_interface):
                     noise_scale_slider = gr.Slider(
                         minimum=0.1,
                         maximum=1.5,
-                        value=0.667,
+                        value=0.1,
                         step=0.01,
                         label="Noise Scale",
                         info="Điều khiển độ biến thiên giọng nói"
@@ -189,7 +189,7 @@ def create_demo(tts_interface):
                     noise_scale_w_slider = gr.Slider(
                         minimum=0.1,
                         maximum=1.5,
-                        value=0.8,
+                        value=1.0,
                         step=0.01,
                         label="Duration Noise",
                         info="Điều khiển độ biến thiên thời lượng"
@@ -198,7 +198,7 @@ def create_demo(tts_interface):
                     sdp_ratio_slider = gr.Slider(
                         minimum=0.0,
                         maximum=1.0,
-                        value=0.0,
+                        value=0.5,
                         step=0.1,
                         label="SDP Ratio",
                         info="0: Xác định | 1: Ngẫu nhiên"
@@ -217,7 +217,7 @@ def create_demo(tts_interface):
                     
                     max_chunk_chars_slider = gr.Slider(
                         minimum=50,
-                        maximum=500,
+                        maximum=3000,
                         value=200,
                         step=10,
                         label="Số ký tự tối đa mỗi đoạn",
