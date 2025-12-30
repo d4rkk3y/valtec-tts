@@ -15,12 +15,43 @@ A Vietnamese Text-to-Speech system supporting multiple speakers with high-qualit
 
 Listen to sample outputs from our TTS system:
 
-| Speaker | Sample Text | Audio |
-|---------|-------------|-------|
-| 👨 **Male** | "Tiếng xe cộ nhộn nhịp và ánh nắng len qua từng con phố nhỏ." | [▶️ example_male.wav](examples/example_male.wav) |
-| 👩 **Female** | "Tiếng xe cộ nhộn nhịp và ánh nắng len qua từng con phố nhỏ." | [▶️ example_female.wav](examples/example_female.wav) |
+| Speaker | Region | Gender | Sample Text | Audio |
+|---------|--------|--------|-------------|-------|
+| **NF** | Northern (Bắc) | Female | "Tiếng xe cộ nhộn nhịp và ánh nắng len qua từng con phố nhỏ." | [▶️ example_NF.wav](examples/example_NF.wav) |
+| **SF** | Southern (Nam) | Female | "Tiếng xe cộ nhộn nhịp và ánh nắng len qua từng con phố nhỏ." | [▶️ example_SF.wav](examples/example_SF.wav) |
+| **NM1** | Northern (Bắc) | Male | "Tiếng xe cộ nhộn nhịp và ánh nắng len qua từng con phố nhỏ." | [▶️ example_NM1.wav](examples/example_NM1.wav) |
+| **SM** | Southern (Nam) | Male | "Tiếng xe cộ nhộn nhịp và ánh nắng len qua từng con phố nhỏ." | [▶️ example_SM.wav](examples/example_SM.wav) |
+| **NM2** | Northern (Bắc) | Male | "Tiếng xe cộ nhộn nhịp và ánh nắng len qua từng con phố nhỏ." | [▶️ example_NM2.wav](examples/example_NM2.wav) |
 
 > 💡 **Tip**: Clone the repository and listen to the files in the `examples/` folder for the best audio quality.
+
+## 🎬 Live Demos
+
+### Web Demo - Browser-based TTS
+
+**[▶️ Watch Web Demo Video](https://github.com/tronghieuit/valtec-tts/raw/dev/examples/ValtecTTS%20-%20WEB.mp4)**
+
+**Features:**
+- ✅ Runs entirely in browser using ONNX Runtime Web
+- ✅ No backend server required
+- ✅ All 5 Vietnamese voices
+- ✅ Real-time synthesis (~165MB models)
+
+[See full documentation](deployments/web/README.md)
+
+---
+
+### Android Demo - On-Device TTS
+
+**[▶️ Watch Android Demo Video](https://github.com/tronghieuit/valtec-tts/raw/dev/examples/ValtecTTS%20-%20Android.mp4)**
+
+**Features:**
+- ✅ On-device ONNX inference
+- ✅ Offline-capable after installation
+- ✅ Tested on Xiaomi 12S Pro (Snapdragon 8+ Gen 1)
+- ✅ ~200-300ms inference time
+
+[See full documentation](deployments/android/README.md)
 
 ## ⚡ Performance Benchmark
 
@@ -121,9 +152,13 @@ audio, sr = tts.synthesize("Xin chào các bạn")
 from valtec_tts import TTS
 
 tts = TTS()
-print(tts.list_speakers())  # ['male', 'female']
+print(tts.list_speakers())  # ['NF', 'SF', 'NM1', 'SM', 'NM2']
 
-tts.speak("Xin chào", speaker="female", output_path="hello.wav")
+# NF = Northern Female, SF = Southern Female
+tts.speak("Xin chào", speaker="NF", output_path="hello.wav")
+
+# NM1/NM2 = Northern Male, SM = Southern Male  
+tts.speak("Xin chào", speaker="NM1", output_path="hello.wav")
 ```
 
 ### Adjust Speed
@@ -152,7 +187,11 @@ tts.speak("Xin chào", output_path="hello.wav")
 
 ```bash
 # Single text synthesis
-python infer.py --text "Xin chào các bạn" --speaker male --output hello.wav
+python infer.py --text "Xin chào các bạn" --speaker NF --output hello.wav
+
+# Try different voices
+python infer.py --text "Xin chào các bạn" --speaker NM1 --output hello_nm1.wav
+python infer.py --text "Xin chào các bạn" --speaker SM --output hello_sm.wav
 
 # Interactive mode
 python infer.py --interactive
@@ -171,15 +210,28 @@ Then open your browser at `http://localhost:7860`
 
 ## Available Speakers
 
-The pretrained model includes the following speakers:
-- `male`
-- `female`
+The pretrained model includes **5 Vietnamese voices** with regional accents:
+
+| Speaker | Region | Gender | Code | Description |
+|---------|--------|--------|------|-------------|
+| **NF** | 🌆 Northern (Miền Bắc) | 👩 Female | `NF` | Northern Female voice |
+| **SF** | 🌾 Southern (Miền Nam) | 👩 Female | `SF` | Southern Female voice |
+| **NM1** | 🌆 Northern (Miền Bắc) | 👨 Male | `NM1` | Northern Male voice 1 |
+| **SM** | 🌾 Southern (Miền Nam) | 👨 Male | `SM` | Southern Male voice |
+| **NM2** | 🌆 Northern (Miền Bắc) | 👨 Male | `NM2` | Northern Male voice 2 |
+
+**Usage Example:**
+```python
+tts.speak("Xin chào", speaker="NF")   # Northern Female
+tts.speak("Xin chào", speaker="NM1")  # Northern Male 1
+tts.speak("Xin chào", speaker="SM")   # Southern Male
+```
 
 ## Synthesis Parameters
 
 - `speed` (default: 1.0): Speech speed
-  - < 1.0 = faster
-  - > 1.0 = slower
+  - '< 1.0 = faster'
+  - '> 1.0 = slower'
 - `noise_scale` (default: 0.667): Controls variability in generated speech
 - `noise_scale_w` (default: 0.8): Controls duration variability
 - `sdp_ratio` (default: 0.0): Stochastic Duration Predictor ratio
@@ -203,19 +255,84 @@ tts = TTS(hf_repo="valtecAI-team/valtec-tts-pretrained")
 
 ```
 valtec-tts/
-├── valtec_tts/          # Main package
+├── valtec_tts/           # Main package
 │   ├── __init__.py
-│   └── tts.py           # Simple TTS API
+│   └── tts.py            # Simple TTS API
 ├── src/
-│   ├── models/          # Neural network models
-│   ├── text/            # Text processing
-│   ├── vietnamese/      # Vietnamese-specific modules
-│   ├── nn/              # Neural network utilities
-│   └── utils/           # General utilities
-├── pretrained/          # Local pretrained models
-├── infer.py             # Inference script
-├── demo_gradio.py       # Gradio web demo
+│   ├── models/           # Neural network models
+│   ├── text/             # Text processing
+│   ├── vietnamese/       # Vietnamese-specific modules
+│   ├── nn/               # Neural network utilities
+│   └── utils/            # General utilities
+├── pretrained/           # Local pretrained models
+│   └── onnx/             # ONNX export models
+├── deployments/          # Production deployments
+│   ├── edge/             # Edge/lightweight deployment (ONNX)
+│   ├── web/              # Browser-based demo
+│   └── android/          # Android mobile app
+├── infer.py              # Inference script
+├── app.py                # Gradio web demo
+├── export_full_onnx.py   # ONNX export script
 └── README.md
+```
+
+## 📱 Deployment Options
+
+### Edge/Lightweight Deployment
+
+**ONNX Runtime** - Optimized for edge devices and lightweight deployment
+
+```bash
+cd deployments/edge
+python inference.py --text "Hello Vietnam" --speaker 2
+```
+
+Features:
+- Auto-downloads models from HuggingFace Hub
+- ~165MB total model size
+- CPU & GPU support
+- See [deployments/edge/README.md](deployments/edge/README.md)
+
+### Web Demo
+
+**Browser-based** - No backend server required
+
+```bash
+# Serve from project root
+npx -y http-server . -p 8080
+# Open: http://localhost:8080/deployments/web/
+```
+
+Features:
+- Full ONNX Runtime Web
+- Runs entirely in browser
+- See [deployments/web/README.md](deployments/web/README.md)
+
+### Android App
+
+**Mobile deployment** - On-device TTS
+
+```bash
+cd deployments/android
+./gradlew assembleDebug
+```
+
+Features:
+- ONNX Runtime Mobile
+- ~185MB APK (models included)
+- Offline-capable
+- See [deployments/android/README.md](deployments/android/README.md)
+
+### API Integration
+
+```python
+# Using HuggingFace Spaces API
+import requests
+
+response = requests.post(
+    "https://valtecai-team-valtec-vietnamese-tts.hf.space/api/synthesize",
+    json={"text": "Xin chào", "speaker": "female"}
+)
 ```
 
 ## License
